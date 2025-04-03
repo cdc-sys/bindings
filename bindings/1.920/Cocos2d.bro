@@ -51,6 +51,8 @@ class cocos2d::CCDirector {
 class cocos2d::CCEGLView {
 	static cocos2d::CCEGLView* sharedOpenGLView();
 
+	void toggleFullScreen(bool);
+
 	virtual void end();
 	virtual void isOpenGLReady();
 	virtual void swapBuffers();
@@ -257,7 +259,7 @@ class cocos2d::CCNode {
 	static cocos2d::CCNode* create();
 
 	CCNode();
-  ~CCNode();
+	~CCNode();
 
 	int getScriptHandler();
 	void scheduleUpdateWithPriorityLua(int, int);
@@ -393,6 +395,11 @@ class cocos2d::CCNode {
 }
 
 [[link(win, android)]]
+class cocos2d::CCScene {
+	int getHighestChildZ();
+}
+
+[[link(win, android)]]
 class cocos2d::CCScheduler {
 	virtual void update(float dt);
 	void scheduleSelector(cocos2d::SEL_SCHEDULE, cocos2d::CCObject*, float, unsigned int, float, bool);
@@ -414,14 +421,23 @@ class cocos2d::CCScheduler {
 }
 
 [[link(win, android)]]
+class cocos2d::CCSprite {
+	static cocos2d::CCSprite* create(char const*);
+	static cocos2d::CCSprite* createWithSpriteFrameName(char const*);
+
+	virtual bool initWithSpriteFrame(cocos2d::CCSpriteFrame*);
+	virtual bool initWithSpriteFrameName(char const*);
+}
+
+[[link(win, android)]]
 class cocos2d::CCSpriteFrameCache {
 	bool init();
 	void addSpriteFramesWithDictionary(cocos2d::CCDictionary*, cocos2d::CCTexture2D*);
-  void addSpriteFramesWithFile(const char*);
+	void addSpriteFramesWithFile(const char*);
 	void addSpriteFramesWithFile(const char*, const char*);
 	void addSpriteFramesWithFile(const char*, cocos2d::CCTexture2D*);
 	void addSpriteFrame(cocos2d::CCSpriteFrame*, const char*);
-  void removeSpriteFrames();
+	void removeSpriteFrames();
 	void removeUnusedSpriteFrames();
 	void removeSpriteFrameByName(const char*);
 	void removeSpriteFramesFromFile(const char*);
@@ -450,30 +466,94 @@ class cocos2d::extension::CCHttpClient {
 }
 
 [[link(win, android)]]
+class cocos2d::extension::CCControlUtils {
+	static cocos2d::extension::HSV HSVfromRGB(cocos2d::extension::RGBA);
+	static cocos2d::extension::RGBA RGBfromHSV(cocos2d::extension::HSV);
+}
+
+[[link(win, android)]]
+class cocos2d::CCIMEDispatcher {
+	static cocos2d::CCIMEDispatcher* sharedDispatcher();
+
+	// CCIMEDispatcher();
+
+	void addDelegate(cocos2d::CCIMEDelegate*);
+	bool attachDelegateWithIME(cocos2d::CCIMEDelegate*);
+	bool detachDelegateWithIME(cocos2d::CCIMEDelegate*);
+	void dispatchDeleteBackward();
+	void dispatchInsertText(char const*, int);
+	void dispatchKeyboardDidHide(cocos2d::CCIMEKeyboardNotificationInfo&);
+	void dispatchKeyboardDidShow(cocos2d::CCIMEKeyboardNotificationInfo&);
+	void dispatchKeyboardWillHide(cocos2d::CCIMEKeyboardNotificationInfo&);
+	void dispatchKeyboardWillHide();
+	void dispatchKeyboardWillShow(cocos2d::CCIMEKeyboardNotificationInfo&);
+	char const* getContentText();
+	bool hasDelegate();
+	void removeDelegate(cocos2d::CCIMEDelegate*);
+}
+
+[[link(win, android)]]
 class cocos2d::CCKeyboardDispatcher {
 	bool dispatchKeyboardMSG(cocos2d::enumKeyCodes, bool);
 }
 
 [[link(win, android)]]
+class cocos2d::CCMouseDispatcher {
+	// CCMouseDispatcher(cocos2d::CCMouseDispatcher const&);
+	// CCMouseDispatcher();
+	void addDelegate(cocos2d::CCMouseDelegate*);
+	bool dispatchScrollMSG(float, float);
+	void forceAddDelegate(cocos2d::CCMouseDelegate*);
+	void forceRemoveDelegate(cocos2d::CCMouseDelegate*);
+	void removeDelegate(cocos2d::CCMouseDelegate*);
+}
+
+[[link(win, android)]]
+class cocos2d::ZipUtils {
+	static gd::string decompressString(gd::string, bool);
+	static gd::string decompressString2(unsigned char* data, bool decrypt, int size);
+}
+
+[[link(win, android)]]
 class DS_Dictionary {
-    bool getBoolForKey(const char*);
-    float getFloatForKey(const char*);
-    int getIntegerForKey(const char*);
-    gd::string getKey(const char*);
-    gd::string getStringForKey(const char*);
-    void setBoolForKey(const char*, bool, bool);
-    void setBoolForKey(const char*, bool);
-    void setFloatForKey(const char*, float, bool);
-    void setFloatForKey(const char*, float);
-    void setIntegerForKey(const char*, int, bool);
-    void setIntegerForKey(const char*, int);
-    void setStringForKey(const char*, gd::string const&, bool);
-    void setStringForKey(const char*, gd::string const&);
-    cocos2d::CCArray* getArrayForKey(const char*);
-    void setArrayForKey(const char*, cocos2d::CCArray*);
-    cocos2d::CCObject* getObjectForKey(const char*);
-    void setObjectForKey(const char*, cocos2d::CCObject*);
-    bool loadRootSubDictFromFile(const char*);
-    bool loadRootSubDictFromString(gd::string);
-    bool loadRootSubDictFromCompressedFile(const char*);
+	bool getBoolForKey(const char*);
+	float getFloatForKey(const char*);
+	int getIntegerForKey(const char*);
+	gd::string getKey(const char*);
+	gd::string getStringForKey(const char*);
+	void setBoolForKey(const char*, bool, bool);
+	void setBoolForKey(const char*, bool);
+	void setFloatForKey(const char*, float, bool);
+	void setFloatForKey(const char*, float);
+	void setIntegerForKey(const char*, int, bool);
+	void setIntegerForKey(const char*, int);
+	void setStringForKey(const char*, gd::string const&, bool);
+	void setStringForKey(const char*, gd::string const&);
+	cocos2d::CCArray* getArrayForKey(const char*);
+	void setArrayForKey(const char*, cocos2d::CCArray*);
+	cocos2d::CCObject* getObjectForKey(const char*);
+	void setObjectForKey(const char*, cocos2d::CCObject*);
+
+	bool loadRootSubDictFromFile(const char*);
+	bool loadRootSubDictFromString(gd::string);
+	bool loadRootSubDictFromCompressedFile(const char*);
+
+	bool saveRootSubDictToCompressedFile(const char*);
+	bool saveRootSubDictToFile(const char*);
+	gd::string saveRootSubDictToString();
+}
+
+[[link(win, android)]]
+class ObjectDecoder {
+	// virtual ~ObjectDecoder();
+
+	static ObjectDecoder* sharedDecoder();
+
+	cocos2d::CCObject* getDecodedObject(int, DS_Dictionary*);
+
+	virtual bool init();
+	virtual ObjectDecoderDelegate* getDelegate() const;
+	virtual void setDelegate(ObjectDecoderDelegate*);
+
+	// ObjectDecoderDelegate* m_delegate;
 }

@@ -4,10 +4,10 @@
 
 namespace { namespace format_strings {
     // requires: base_classes, class_name
-    char const* binding_include = R"GEN(#include "binding/{file_name}"
+    constexpr char const* binding_include = R"GEN(#include "{base_directory}/{file_name}"
 )GEN";
 
-    char const* class_includes = R"GEN(#pragma once
+    constexpr char const* class_includes = R"GEN(#pragma once
 #include <stdexcept>
 #include <Geode/platform/platform.hpp>
 #include <Geode/c++stl/gdstdlib.hpp>
@@ -19,34 +19,34 @@ namespace { namespace format_strings {
 
 )GEN";
 
-    char const* class_no_includes = R"GEN(#pragma once
+    constexpr char const* class_no_includes = R"GEN(#pragma once
 #include <Geode/platform/platform.hpp>
 #include <stdexcept>
 
 )GEN";
     
-    char const* class_include_prereq = R"GEN(#include "{file_name}"
+    constexpr char const* class_include_prereq = R"GEN(#include "{file_name}"
 )GEN";
 
-    char const* class_start = R"GEN(
+    constexpr char const* class_start = R"GEN(
 class {class_name}{base_classes} {{
 public:
     static constexpr auto CLASS_NAME = "{class_name}";
 )GEN";
 
-	char const* custom_constructor = R"GEN(    GEODE_CUSTOM_CONSTRUCTOR_GD({class_name}, {first_base})
+	constexpr char const* custom_constructor = R"GEN(    GEODE_CUSTOM_CONSTRUCTOR_GD({class_name}, {first_base})
 )GEN";
 
-	char const* custom_constructor_cutoff = R"GEN(    GEODE_CUSTOM_CONSTRUCTOR_CUTOFF({class_name}, {first_base})
+	constexpr char const* custom_constructor_cutoff = R"GEN(    GEODE_CUSTOM_CONSTRUCTOR_CUTOFF({class_name}, {first_base})
 )GEN";
 
-    char const* function_definition = R"GEN(
+    constexpr char const* function_definition = R"GEN(
     /**
 {docs}{docs_addresses}     */
     {static}{virtual}{return_type} {function_name}({parameters}){const};
 )GEN";
 
-    char const* error_definition = R"GEN(    
+    constexpr char const* error_definition = R"GEN(    
 private:
     [[deprecated("{class_name}::{function_name} not implemented")]]
     /**
@@ -55,25 +55,27 @@ private:
 public:
 )GEN";
 
-    char const* structor_definition = R"GEN(
+    constexpr char const* structor_definition = R"GEN(
     /**
 {docs}{docs_addresses}     */
     {function_name}({parameters});
 )GEN";
     
     // requires: type, member_name, array
-    char const* member_definition = R"GEN({private}    {type} {member_name};{public}
+    constexpr char const* member_definition = R"GEN({private}    {type} {member_name};{public}
 )GEN";
 
-    char const* pad_definition = R"GEN(    GEODE_PAD({hardcode});
+    constexpr char const* pad_definition = R"GEN(    GEODE_PAD({hardcode});
 )GEN";
 
-    char const* class_end = R"GEN(};
+    constexpr char const* class_end = R"GEN(};
 )GEN";
 }}
 
 inline std::string nameForPlatform(Platform platform) {
     switch (platform) {
+        case Platform::MacArm: return "MacOS (ARM)";
+        case Platform::MacIntel: return "MacOS (Intel)";
         case Platform::Mac: return "MacOS";
         case Platform::Windows: return "Windows";
         case Platform::iOS: return "iOS";
@@ -88,7 +90,7 @@ template <class T>
 std::string generateAddressDocs(T const& f, PlatformNumber pn) {
     std::string ret;
 
-    for (auto platform : {Platform::Mac, Platform::Windows, Platform::iOS, Platform::Android}) {
+    for (auto platform : {Platform::MacArm, Platform::MacIntel, Platform::Windows, Platform::iOS, Platform::Android}) {
         auto status = codegen::getStatusWithPlatform(platform, f);
 
         if (status == BindStatus::NeedsBinding) {
@@ -102,7 +104,11 @@ std::string generateAddressDocs(T const& f, PlatformNumber pn) {
                 nameForPlatform(platform)
             );
         }
-        
+        else if (status == BindStatus::Inlined) {
+            ret += fmt::format("     * @note[short] {}: Out of line\n", 
+                nameForPlatform(platform)
+            );
+        }
     }
 
     return ret;
@@ -119,14 +125,20 @@ std::string generateDocs(std::string const& docs) {
     return ret;
 }
 
-std::string generateBindingHeader(Root const& root, ghc::filesystem::path const& singleFolder) {
+std::string generateBindingHeader(Root const& root, std::filesystem::path const& singleFolder, std::unordered_set<std::string>* generatedFiles) {
     std::string output;
+    std::string base_directory = singleFolder.filename().string();
 
     {
         std::string filename = "Standalones.hpp";
-        output += fmt::format(format_strings::binding_include, 
+        output += fmt::format(format_strings::binding_include,
+            fmt::arg("base_directory", base_directory),
             fmt::arg("file_name", filename)
         );
+
+        if (generatedFiles != nullptr) {
+            generatedFiles->insert(filename);
+        }
 
         std::string single_output;
         single_output += format_strings::class_includes;
@@ -135,12 +147,11 @@ std::string generateBindingHeader(Root const& root, ghc::filesystem::path const&
             if (codegen::getStatus(f) == BindStatus::Missing) continue;
 
             FunctionProto const* fb = &f.prototype;
-            char const* used_format = format_strings::function_definition;
 
             std::string addressDocs = generateAddressDocs(f, f.binds);
             std::string docs = generateDocs(fb->attributes.docs);
 
-            single_output += fmt::format(used_format,
+            single_output += fmt::format(format_strings::function_definition,
                 fmt::arg("virtual", ""),
                 fmt::arg("static", ""),
                 fmt::arg("class_name", ""),
@@ -157,14 +168,19 @@ std::string generateBindingHeader(Root const& root, ghc::filesystem::path const&
         writeFile(singleFolder / filename, single_output);
     }
 
-   	for (auto& cls : root.classes) {
+        for (auto& cls : root.classes) {
         if (is_cocos_class(cls.name))
             continue;
 
         std::string filename = (codegen::getUnqualifiedClassName(cls.name) + ".hpp");
-        output += fmt::format(format_strings::binding_include, 
+        output += fmt::format(format_strings::binding_include,
+            fmt::arg("base_directory", base_directory),
             fmt::arg("file_name", filename)
         );
+
+        if (generatedFiles != nullptr) {
+            generatedFiles->insert(filename);
+        }
 
         std::string single_output;
         if (cls.name != "GDString") {
@@ -179,7 +195,7 @@ std::string generateBindingHeader(Root const& root, ghc::filesystem::path const&
         }
 
         for (auto dep : cls.attributes.depends) {
-            if (can_find(dep, "cocos2d::")) continue;
+            if (is_cocos_class(dep)) continue;
 
             std::string depfilename = (codegen::getUnqualifiedClassName(dep) + ".hpp");
 
@@ -200,9 +216,9 @@ std::string generateBindingHeader(Root const& root, ghc::filesystem::path const&
         // what.
         if (!cls.superclasses.empty()) {
             single_output += fmt::format(
-                is_cocos_class(cls.superclasses[0]) 
+                fmt::runtime(is_cocos_class(cls.superclasses[0]) 
                     ? format_strings::custom_constructor_cutoff
-                    : format_strings::custom_constructor,
+                    : format_strings::custom_constructor),
                 fmt::arg("class_name", cls.name),
                 fmt::arg("first_base", cls.superclasses[0])
             );
@@ -221,6 +237,10 @@ std::string generateBindingHeader(Root const& root, ghc::filesystem::path const&
             } else if (auto m = field.get_as<MemberField>()) {
 
                 if (m->platform == Platform::None || (m->platform & codegen::platform) != Platform::None) {
+                    auto* opt = std::getenv("CODEGEN_FORCE_PUBLIC_MEMBER");
+                    if (opt != nullptr && std::string_view(opt) == "1") {
+                        unimplementedField = false;
+                    }
                     single_output += fmt::format(format_strings::member_definition,
                         fmt::arg("private", unimplementedField ? "private:\n" : ""),
                         fmt::arg("public", unimplementedField ? "\npublic:" : ""),
@@ -241,10 +261,6 @@ std::string generateBindingHeader(Root const& root, ghc::filesystem::path const&
                     unimplementedField = true;
 
                 continue;
-            } else if (auto fn = field.get_as<OutOfLineField>()) {
-                fb = &fn->prototype;
-                addressDocs = "     * @note[short] Out of line\n";
-
             } else if (auto fn = field.get_as<FunctionBindField>()) {
                 if (codegen::getStatus(*fn) == BindStatus::Missing)
                     continue;
@@ -263,7 +279,7 @@ std::string generateBindingHeader(Root const& root, ghc::filesystem::path const&
 
             std::string docs = generateDocs(fb->attributes.docs);
 
-            single_output += fmt::format(used_format,
+            single_output += fmt::format(fmt::runtime(used_format),
                 fmt::arg("virtual", str_if("virtual ", fb->is_virtual)),
                 fmt::arg("static", str_if("static ", fb->is_static)),
                 fmt::arg("class_name", cls.name),

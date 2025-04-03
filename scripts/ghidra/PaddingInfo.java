@@ -12,7 +12,7 @@ public class PaddingInfo {
         this.offset = offset;
     }
 
-    public PaddingInfo(String comment) {
+    public PaddingInfo(String comment, Platform curPlatform) {
         if (comment == null || comment.isEmpty()) {
             this.platforms = Map.of();
             this.offset = -1;
@@ -25,7 +25,7 @@ public class PaddingInfo {
             return;
         }
         var matcher = Pattern.compile(
-            "(?<platform>offset|win|mac|android32|android64|ios)\\s*0x(?<addr>[0-9a-fA-F]+)"
+            "(?<platform>offset|win|imac|m1|android32|android64|ios)\\s*0x(?<addr>[0-9a-fA-F]+)"
         ).matcher(meta.group("meta"));
         this.platforms = new HashMap<Platform, Integer>();
         int offset = 0;
@@ -35,7 +35,7 @@ public class PaddingInfo {
                 offset = addr;
             }
             else {
-                this.platforms.put(Platform.fromShortName(matcher.group("platform")), addr);
+                this.platforms.put(Platform.fromShortName(matcher.group("platform"), curPlatform), addr);
             }
         }
         this.offset = offset;

@@ -12,6 +12,12 @@ if (NOT DEFINED GEODE_LOADER_PATH)
 	message(FATAL_ERROR "GEODE_LOADER_PATH is not defined.")
 endif()
 
+option(
+	BINDINGS_VERSIONED_ONLY
+	"Disables inclusion of the unversioned Enums header, allowing for builds on older Geode/Geometry Dash versions."
+	OFF
+)
+
 if (NOT GEODE_BINDINGS_PATH)
 	set(GEODE_BINDINGS_PATH ${CMAKE_CURRENT_SOURCE_DIR}/bindings/${GEODE_GD_VERSION})
 endif()
@@ -116,11 +122,14 @@ if (NOT SKIP_BUILDING_CODEGEN)
 	)
 
 	set(ENV{SCCACHE_C_CUSTOM_CACHE_BUSTER} PREV_SCCACHE_C_CUSTOM_CACHE_BUSTER)
+else()
+	message(STATUS "Skipping building Codegen")
+	message(VERBOSE "Codegen CMake args were: '${GEODE_CODEGEN_CMAKE_ARGS}'")
 endif()
 
 message(STATUS "Running Codegen")
 execute_process(
-	COMMAND ./Codegen ${GEODE_TARGET_PLATFORM} ${GEODE_BINDINGS_PATH} ${GEODE_CODEGEN_PATH}
+	COMMAND ./Codegen ${GEODE_TARGET_PLATFORM} ${GEODE_BINDINGS_PATH} ${GEODE_CODEGEN_PATH} ${GEODE_CODEGEN_EXTRA_ARGS}
 	WORKING_DIRECTORY ${GEODE_CODEGEN_BINARY_OUT}
 	COMMAND_ECHO STDOUT
 	COMMAND_ERROR_IS_FATAL ANY
@@ -137,7 +146,7 @@ file(GLOB GEODE_CODEGEN_OUT_FILES
 add_custom_command(
 	DEPENDS ${GEODE_BINDINGS_FILES}
 	COMMENT "Running Codegen"
-	COMMAND ./Codegen ${GEODE_TARGET_PLATFORM} ${GEODE_BINDINGS_PATH} ${GEODE_CODEGEN_PATH}
+	COMMAND ./Codegen ${GEODE_TARGET_PLATFORM} ${GEODE_BINDINGS_PATH} ${GEODE_CODEGEN_PATH} ${GEODE_CODEGEN_EXTRA_ARGS}
 	WORKING_DIRECTORY ${GEODE_CODEGEN_BINARY_OUT}
 	OUTPUT ${GEODE_CODEGEN_OUT_FILES}
 )
@@ -148,15 +157,29 @@ if (GEODE_IS_MEMBER_TEST)
 endif()
 
 add_library(${PROJECT_NAME} ${GEODE_CODEGEN_PATH}/Geode/GeneratedSource.cpp)
-target_include_directories(${PROJECT_NAME} PUBLIC ${GEODE_CODEGEN_PATH})
+target_include_directories(${PROJECT_NAME} PUBLIC
+	${GEODE_CODEGEN_PATH}
+)
+
+if (NOT BINDINGS_VERSIONED_ONLY)
+	target_include_directories(${PROJECT_NAME} PUBLIC
+		${CMAKE_CURRENT_SOURCE_DIR}/bindings/include
+	)
+endif()
 
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
 
-if (APPLE)
+if (WIN32)
+	if (MSVC)
+		target_compile_options(${PROJECT_NAME} PUBLIC /bigobj)
+	endif()
+elseif (APPLE)
 	target_compile_options(${PROJECT_NAME} PUBLIC -ffunction-sections -fdata-sections)
 	target_link_options(${PROJECT_NAME} PUBLIC -dead_strip)
 elseif (ANDROID)
 	target_compile_options(${PROJECT_NAME} PUBLIC -ffunction-sections -fdata-sections)
 	target_link_options(${PROJECT_NAME} PUBLIC -Wl,--gc-sections)
 endif()
+
+add_definitions(-DGLES_SILENCE_DEPRECATION) #vro why wasn't that here the whole time

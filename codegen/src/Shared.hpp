@@ -1,11 +1,12 @@
 #pragma once
 
 #include <array>
+#include <unordered_set>
 #include <broma.hpp>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <fstream>
-#include <ghc/filesystem.hpp>
+#include <filesystem>
 
 using std::istreambuf_iterator;
 
@@ -18,15 +19,18 @@ using namespace broma;
 
 #include "AndroidSymbol.hpp"
 #include "WindowsSymbol.hpp"
+#include <matjson.hpp>
 
 std::string generateAddressHeader(Root const& root);
-std::string generateModifyHeader(Root const& root, ghc::filesystem::path const& singleFolder);
-std::string generateBindingHeader(Root const& root, ghc::filesystem::path const& singleFolder);
+std::string generateModifyHeader(Root const& root, std::filesystem::path const& singleFolder, std::unordered_set<std::string>* generatedFiles = nullptr);
+std::string generateBindingHeader(Root const& root, std::filesystem::path const& singleFolder, std::unordered_set<std::string>* generatedFiles = nullptr);
 std::string generatePredeclareHeader(Root const& root);
-std::string generateBindingSource(Root const& root);
-std::string generateJsonInterface(Root const& root);
+std::string generateBindingSource(Root const& root, bool skipPugixml);
+std::string generateTextInterface(Root const& root);
+matjson::Value generateJsonInterface(Root const& root);
 
-inline void writeFile(ghc::filesystem::path const& writePath, std::string const& output) {
+// returns true if the file contents were different (overwritten), false otherwise
+inline bool writeFile(std::filesystem::path const& writePath, std::string const& output) {
     std::ifstream readfile;
     readfile >> std::noskipws;
     readfile.open(writePath);
@@ -38,7 +42,11 @@ inline void writeFile(ghc::filesystem::path const& writePath, std::string const&
         writefile.open(writePath);
         writefile << output;
         writefile.close();
+
+        return true;
     }
+
+    return false;
 }
 
 inline std::string str_if(std::string&& str, bool cond) {
@@ -50,11 +58,16 @@ inline bool can_find(std::string const& str, char const* text) {
 }
 
 inline bool is_cocos_class(std::string const& str) {
-    return can_find(str, "cocos2d") || can_find(str, "pugi::") || str == "DS_Dictionary";
+    return can_find(str, "cocos2d") || can_find(str, "pugi::") || str == "DS_Dictionary" || str == "ObjectDecoder" || str == "ObjectDecoderDelegate" || str == "CCContentManager";
+}
+
+inline bool is_in_cocos_dll(std::string const& str) {
+    return is_cocos_class(str) && !can_find(str, "CCLightning");
 }
 
 enum class BindStatus {
     Binded,
+    Inlined,
     NeedsBinding,
     Unbindable,
     Missing,
@@ -91,15 +104,76 @@ namespace codegen {
     }
 
     template <typename... Args>
-    inline codegen_error error(Args... args) {
-        return codegen_error(fmt::format(args...).c_str());
+    inline codegen_error error(fmt::format_string<Args...> fmt, Args&&... args) {
+        return codegen_error(fmt::format(fmt, std::forward<Args>(args)...).c_str());
     }
 
     inline Platform platform;
+    inline enum class PlatformArch {
+        Default,
+        x86,
+        x64,
+        arm64
+    } platformArch = PlatformArch::Default;
+
+    enum class VersionType {
+        Alpha,
+        Beta,
+        Prerelease,
+        Release,
+    };
+
+    struct Version {
+        int major = 0;
+        int minor = 0;
+        int patch = 0;
+        VersionType type = VersionType::Release;
+        int tag = 0;
+
+        static Version fromString(std::string const& str) {
+            Version v;
+            if (str.empty()) return v;
+
+            std::vector<std::string> parts;
+
+            for (auto& c : str) {
+                if (c == '.' || c == '-') parts.push_back("");
+                else {
+                    if (parts.empty()) parts.push_back("");
+                    parts.back() += c;
+                }
+            }
+
+            if (parts.size() > 0) v.major = std::stoi(parts[0].starts_with("v") ? parts[0].substr(1) : parts[0]);
+            if (parts.size() > 1) v.minor = std::stoi(parts[1]);
+            if (parts.size() > 2) v.patch = std::stoi(parts[2]);
+            if (parts.size() > 3) {
+                if (parts[3].starts_with("alpha")) v.type = VersionType::Alpha;
+                else if (parts[3].starts_with("beta")) v.type = VersionType::Beta;
+                else if (parts[3].starts_with("prerelease")) v.type = VersionType::Prerelease;
+            }
+            if (parts.size() > 4) v.tag = std::stoi(parts[4]);
+
+            return v;
+        }
+    };
+
+    inline bool operator<(Version const& a, std::string const& b) {
+        auto v = Version::fromString(b);
+        return std::tie(a.major, a.minor, a.patch, a.type, a.tag) < std::tie(v.major, v.minor, v.patch, v.type, v.tag);
+    }
+
+    inline Version sdkVersion = {
+        .major = 99,
+        .minor = 99,
+        .patch = 99
+    };
 
     inline ptrdiff_t platformNumberWithPlatform(Platform p, PlatformNumber const& pn) {
         switch (p) {
-            case Platform::Mac: return pn.mac;
+            case Platform::Mac: return pn.imac;
+            case Platform::MacIntel: return pn.imac;
+            case Platform::MacArm: return pn.m1;
             case Platform::Windows: return pn.win;
             case Platform::iOS: return pn.ios;
             case Platform::Android: return pn.android32;
@@ -122,7 +196,9 @@ namespace codegen {
     }
 
     inline BindStatus getStatusWithPlatform(Platform p, FunctionBindField const& fn) {
-        if ((fn.prototype.attributes.missing & p) != Platform::None) return BindStatus::Missing;
+        if (platformNumberWithPlatform(p, fn.binds) == -2) return BindStatus::Inlined;
+
+        if ((fn.prototype.attributes.missing & p) != Platform::None || codegen::sdkVersion < fn.prototype.attributes.since) return BindStatus::Missing;
         if ((fn.prototype.attributes.links & p) != Platform::None) return BindStatus::Binded;
 
         if (platformNumberWithPlatform(p, fn.binds) != -1) return BindStatus::NeedsBinding;
@@ -131,9 +207,11 @@ namespace codegen {
     }
 
     inline BindStatus getStatusWithPlatform(Platform p, Function const& f) {
-        if ((f.prototype.attributes.missing & p) != Platform::None) return BindStatus::Missing;
+        if (platformNumberWithPlatform(p, f.binds) == -2) return BindStatus::Inlined;
 
+        if ((f.prototype.attributes.missing & p) != Platform::None || codegen::sdkVersion < f.prototype.attributes.since) return BindStatus::Missing;
         if ((f.prototype.attributes.links & p) != Platform::None) return BindStatus::Binded;
+
         if (platformNumberWithPlatform(p, f.binds) != -1) return BindStatus::NeedsBinding;
 
         return BindStatus::Unbindable;
@@ -141,6 +219,7 @@ namespace codegen {
 
     inline bool shouldAndroidBind(const FunctionBindField* fn) {
         if (codegen::platform == Platform::Android32 || codegen::platform == Platform::Android64) {
+            if (sdkVersion < fn->prototype.attributes.since) return false;
             if (fn->prototype.type != FunctionType::Normal) return true;
             for (auto& [type, name] : fn->prototype.args) {
                 if (can_find(type.name, "gd::")) return true;
@@ -161,7 +240,10 @@ namespace codegen {
         std::vector<std::string> parameters;
 
         for (auto& [t, n] : f.args) {
-            parameters.push_back(fmt::format("{} {}", t.name, n));
+            if (t.name == "...")
+                parameters.push_back("...");
+            else
+                parameters.push_back(fmt::format("{} {}", t.name, n));
         }
 
         return fmt::format("{}", fmt::join(parameters, ", "));
@@ -192,17 +274,27 @@ namespace codegen {
 
         if (auto fn = f.get_as<FunctionBindField>()) {
             auto status = getStatus(*fn);
-
-            if (fn->prototype.is_static) {
-                if (status == BindStatus::Binded) return "Cdecl";
-                else return "Optcall";
-            }
-            else if (fn->prototype.is_virtual || fn->prototype.is_callback) {
-                return "Thiscall";
-            }
-            else {
-                if (status == BindStatus::Binded) return "Thiscall";
-                else return "Membercall";
+            if (codegen::platformArch == PlatformArch::x86) {
+                // for windows x86, aka versions before 2.206
+                if (fn->prototype.is_static) {
+                    if (status == BindStatus::Binded) return "Cdecl";
+                    else return "Optcall";
+                }
+                else if (fn->prototype.is_virtual || fn->prototype.is_callback) {
+                    return "Thiscall";
+                }
+                else {
+                    if (status == BindStatus::Binded) return "Thiscall";
+                    else return "Membercall";
+                }
+            } else {
+                // windows x64 (post 2.206) only has 2 ccs
+                if (fn->prototype.is_static) {
+                    return "Default";
+                }
+                else {
+                    return "Thiscall";
+                }
             }
         }
         else throw codegen::error("Tried to get convention of non-function");
@@ -258,7 +350,7 @@ namespace codegen {
             };
 
             if (codegen::getStatus(*fn) == BindStatus::NeedsBinding || codegen::platformNumber(field) != -1) {
-                if (is_cocos_class(field.parent) && codegen::platform == Platform::Windows) {
+                if (is_in_cocos_dll(field.parent) && codegen::platform == Platform::Windows) {
                     return fmt::format("base::getCocos() + 0x{:x}", codegen::platformNumber(fn->binds));
                 }
                 else {
